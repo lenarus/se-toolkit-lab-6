@@ -463,6 +463,17 @@ Requirements:
 - Must be diagnosable by reading the source code with `read_file`.
 - Must have clear fixes the agent can suggest.
 
+### Future: log-based discovery
+
+The current approach uses API error responses — the agent hits a buggy endpoint and sees the error directly. A more realistic version would use application logs:
+
+1. Add Python `logging` to the backend (structured JSON logs to a file or stdout).
+2. Expose logs via a `GET /logs` endpoint (authenticated, read-only, returns recent entries) or let the agent `read_file` on a log path.
+3. Plant bugs that don't return errors to the caller but silently log warnings/errors (e.g., caught exceptions, data inconsistencies).
+4. Class D questions become: "Check the application logs for errors" → agent queries `/logs` → sees traceback → reads source → explains fix.
+
+This is a better model of real-world debugging (errors are often silent to the user but visible in logs). Deferred to a future iteration because it requires adding a logging framework to the backend.
+
 ## Decisions
 
 | # | Decision |
