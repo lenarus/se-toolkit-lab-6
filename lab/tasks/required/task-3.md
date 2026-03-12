@@ -4,37 +4,15 @@ In Task 2 you built an agent that reads documentation. But documentation can be 
 
 ## What you will build
 
-You will add a `query_api` tool to the agent you built in Task 2. The agent can now reach your deployed backend in addition to reading files.
-
-```mermaid
-flowchart TD
-    Q["uv run agent.py 'How many items are in the database?'"]
-
-    subgraph agent.py
-        Send["Send question to LLM"] --> Decision{"LLM response?"}
-        Decision -->|tool call| Exec["Execute tool"]
-        Exec --> Send
-        Decision -->|text answer| Done["Build JSON output"]
-    end
-
-    Q --> Send
-    Exec -.->|"read_file, list_files"| Files["wiki/ and source code"]
-    Exec -.->|"query_api(GET, /items/)"| API["Backend API\nlocalhost:42002"]
-    Send -.-> LLM["LLM API (OpenRouter)"]
-    Done --> Out["{answer, tool_calls}"]
-```
+You will add a `query_api` tool to the agent you built in Task 2. The agentic loop stays the same — you are just adding one more tool the LLM can call. The agent can now reach your deployed backend in addition to reading files.
 
 ## CLI interface
 
-Same as Task 2. The only change: `source` is now optional (system questions may not have a wiki source).
-
-**Input:**
+Same rules as Task 2. The only change: `source` is now optional (system questions may not have a wiki source).
 
 ```bash
 uv run agent.py "How many items are in the database?"
 ```
-
-**Output:**
 
 ```json
 {
@@ -45,105 +23,46 @@ uv run agent.py "How many items are in the database?"
 }
 ```
 
-## New tool
+## New tool: `query_api`
 
-You must implement one new tool and register it as a function-calling schema in your LLM request.
-
-### `query_api`
-
-Call your deployed backend API.
+Call your deployed backend API. Register it as a function-calling schema alongside your existing tools.
 
 - **Parameters:** `method` (string — GET, POST, etc.), `path` (string — e.g., `/items/`), `body` (string, optional — JSON request body).
 - **Returns:** JSON string with `status_code` and `body`.
 - **Authentication:** use `LMS_API_KEY` from `.env.docker.secret` (the backend key, not the LLM key).
 
+Update your system prompt so the LLM knows when to use wiki tools vs `query_api` vs `read_file` on source code.
+
 > **Note:** Two distinct keys: `LMS_API_KEY` (in `.env.docker.secret`) protects your backend endpoints. `LLM_API_KEY` (in `.env.agent.secret`) authenticates with your LLM provider. Don't mix them up.
-
-## System prompt updates
-
-Update your system prompt so the LLM knows:
-
-- When to use wiki tools (questions about course concepts, documentation).
-- When to use `query_api` (questions about the running system, live data, status codes).
-- When to use `read_file` on source code (questions about implementation details like which framework, ORM, etc.).
 
 ## Deliverables
 
 ### 1. Plan (`plans/task-3.md`)
 
-Before writing code, create `plans/task-3.md`. Describe:
-
-- How you will define the `query_api` tool schema.
-- How you will handle authentication (`LMS_API_KEY`).
-- How you will update the system prompt so the LLM decides between wiki and system tools.
-
-Commit:
-
-```text
-docs: add implementation plan for system agent
-```
+Before writing code, create `plans/task-3.md`. Describe how you will define the `query_api` tool schema, handle authentication, and update the system prompt.
 
 ### 2. Tool and agent updates (update `agent.py`)
 
-Update `agent.py` to:
-
-- Define `query_api` as a function-calling schema.
-- Implement the `query_api` function with authentication.
-- Update the system prompt for system questions.
-
-Commit:
-
-```text
-feat: add query_api tool for system queries
-```
+Add `query_api` as a function-calling schema, implement it with authentication, and update the system prompt.
 
 ### 3. Documentation (update `AGENT.md`)
 
-Update `AGENT.md` to document:
+Update `AGENT.md` to document the `query_api` tool, its authentication, and how the LLM decides between wiki and system tools.
 
-- **Tools:** what `query_api` does, its parameters, and authentication.
-- **System prompt updates:** how the LLM decides between wiki and system tools.
-- **Configuration:** the `LMS_API_KEY` environment variable needed for `query_api`.
+### 4. Tests (5 more tests)
 
-Commit:
-
-```text
-docs: update agent documentation with system tools
-```
-
-### 4. Tests (5 tests)
-
-Add 5 regression tests that verify tool calling works. Each test should:
-
-- Run `agent.py` as a subprocess with a question that requires a tool.
-- Parse the stdout JSON.
-- Check that `tool_calls` is non-empty and contains the expected tool name.
-- Check that the answer is reasonable.
-
-Example test questions:
+Add 5 regression tests for system agent tools. Example questions:
 
 - `"What framework does the backend use?"` → expects `read_file` in tool_calls.
-- `"What files are in the backend/app/routers/ directory?"` → expects `list_files` in tool_calls.
 - `"How many items are in the database?"` → expects `query_api` in tool_calls.
-
-Commit:
-
-```text
-test: add regression tests for system agent tools
-```
 
 ### 5. Deployment
 
-Deploy the updated agent to your VM.
-
-Make sure:
-
-- Both `.env.agent.secret` (LLM key) and `.env.docker.secret` (backend API key) are configured.
-- The backend is running and reachable from `agent.py`.
+Deploy the updated agent to your VM. Make sure both `.env.agent.secret` (LLM key) and `.env.docker.secret` (backend API key) are configured.
 
 ### 6. Benchmark
 
-Run `uv run run_eval.py` — it now includes system questions on top of wiki questions. When a question fails, the benchmark shows a **feedback hint** that guides you without revealing the exact expected answer.
+Run `uv run run_eval.py` — it now includes system questions on top of wiki questions.
 
 ## Acceptance criteria
 

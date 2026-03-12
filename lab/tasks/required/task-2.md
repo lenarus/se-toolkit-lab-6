@@ -70,76 +70,27 @@ List files and directories at a given path.
 
 ### 1. Plan (`plans/task-2.md`)
 
-Before writing code, create `plans/task-2.md`. Describe:
-
-- How you will define tool schemas (JSON format for the LLM).
-- How you will implement the agentic loop (detect tool calls, execute, feed back).
-- How you will handle security (path restriction).
-
-Commit:
-
-```text
-docs: add implementation plan for documentation agent
-```
+Before writing code, create `plans/task-2.md`. Describe how you will define tool schemas, implement the agentic loop, and handle path security.
 
 ### 2. Tools and agentic loop (update `agent.py`)
 
-Update `agent.py` to:
-
-- Define `read_file` and `list_files` as function-calling schemas.
-- Implement the agentic loop (tool call → execute → feed result → repeat).
-- Navigate the `wiki/` directory to find answers.
-- Return JSON with `answer`, `source`, and `tool_calls` fields.
-
-Commit:
-
-```text
-feat: implement documentation agent with wiki tools
-```
+Update `agent.py` to define `read_file` and `list_files` as function-calling schemas, implement the agentic loop, and return JSON with `answer`, `source`, and `tool_calls` fields.
 
 ### 3. Documentation (update `AGENT.md`)
 
-Update `AGENT.md` to document:
-
-- **Tools:** what each tool does, its parameters, and security constraints.
-- **Agentic loop:** how the loop works (when it calls tools, when it stops).
-- **System prompt strategy:** how you guide the LLM to navigate the wiki.
-
-Commit:
-
-```text
-docs: update agent documentation with tool calling
-```
+Update `AGENT.md` to document the tools, the agentic loop, and your system prompt strategy.
 
 ### 4. Tests (5 more tests)
 
-Add 5 regression tests that verify the documentation agent works. Each test should:
-
-- Run `agent.py` as a subprocess with a question that requires a tool.
-- Parse the stdout JSON.
-- Check that `tool_calls` is non-empty and contains the expected tool name.
-- Check that the `source` field points to a reasonable wiki section.
-
-Example test questions:
+Add 5 regression tests for the documentation agent. Example questions:
 
 - `"How do you resolve a merge conflict?"` → expects `read_file` in tool_calls, `wiki/git-workflow.md` in source.
 - `"What files are in the wiki?"` → expects `list_files` in tool_calls.
 - `"What is a Docker volume?"` → expects `read_file` in tool_calls, `wiki/docker` in source.
 
-Commit:
-
-```text
-test: add regression tests for documentation agent
-```
-
 ### 5. Deployment
 
-Deploy the updated agent to your VM. The autochecker will SSH in and run questions that require tools.
-
-Make sure:
-
-- The project repo is accessible to `agent.py` on the VM.
-- `.env.agent.secret` is configured on the VM (same LLM credentials as your local setup).
+Deploy the updated agent to your VM. Make sure `.env.agent.secret` is configured on the VM.
 
 ## Acceptance criteria
 
