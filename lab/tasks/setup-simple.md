@@ -7,7 +7,7 @@
   - [1.4. Deploy to your VM](#14-deploy-to-your-vm)
   - [1.5. Populate the database](#15-populate-the-database)
   - [1.6. Verify the deployment](#16-verify-the-deployment)
-  - [1.7. Set up a coding agent](#17-set-up-a-coding-agent)
+  - [1.7. Coding agent](#17-coding-agent)
 
 ## 1. Required steps
 
@@ -248,12 +248,11 @@ The database starts empty. You need to run the ETL pipeline to populate it with 
 > - You entered the correct API key in the frontend
 > - Try selecting a different lab in the dropdown (e.g., `lab-04`)
 
-### 1.7. Set up a coding agent
+### 1.7. Coding agent
 
-A coding agent can help you write code, explain concepts, and debug issues.
-
-- Method 1: [Set up a `Qwen Code`-based agent](../../wiki/qwen.md#set-up-qwen-code).
-- Method 2: [Choose another coding agent](../../wiki/coding-agents.md#choose-and-use-a-coding-agent).
+> [!NOTE]
+> You should already have a coding agent from Lab 5.
+> If not, [set one up](../../wiki/coding-agents.md#choose-and-use-a-coding-agent).
 
 ----
 
