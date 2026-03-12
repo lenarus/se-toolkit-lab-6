@@ -17,6 +17,7 @@
   - [1.6. Verify the deployment](#16-verify-the-deployment)
   - [1.7. Set up a coding agent](#17-set-up-a-coding-agent)
   - [1.8. Set up the autochecker](#18-set-up-the-autochecker)
+  - [1.9. Set up LLM access](#19-set-up-llm-access)
 
 ## 1. Required steps
 
@@ -270,6 +271,64 @@ A coding agent can help you write code, explain concepts, and debug issues.
 
 [Check the task using the autochecker `Telegram` bot](../../wiki/autochecker.md#check-the-task-using-the-autochecker-bot).
 
+### 1.9. Set up LLM access
+
+Your agent needs an LLM that supports the OpenAI-compatible chat completions API with **tool calling** (function calling). [OpenRouter](https://openrouter.ai) offers free models with no credit card required.
+
+1. Create an account at [openrouter.ai](https://openrouter.ai) and get an API key.
+
+2. Create the LLM environment file:
+
+   ```terminal
+   cp .env.agent.example .env.agent.secret
+   ```
+
+3. Edit `.env.agent.secret` and fill in your credentials:
+
+   ```text
+   LLM_API_KEY=your-openrouter-api-key
+   LLM_API_BASE=https://openrouter.ai/api/v1
+   LLM_MODEL=meta-llama/llama-4-scout:free
+   ```
+
+> [!NOTE]
+> **Recommended models** (free, reliable tool calling):
+>
+> | Model | Tool calling | Notes |
+> |-------|-------------|-------|
+> | `meta-llama/llama-4-scout:free` | Strong | Best free option |
+> | `meta-llama/llama-3.3-70b-instruct:free` | Strong | Reliable fallback |
+> | `qwen/qwen-2.5-72b-instruct:free` | Good | Alternative |
+>
+> Choose a model that supports **tool calling** — you will need it in Task 1.
+
+4. Verify your LLM connection:
+
+   ```terminal
+   python verify_llm.py
+   ```
+
+   You should see:
+
+   ```terminal
+   ✓ LLM connection works
+   ✓ Tool calling works
+   ```
+
+5. Set up the same LLM credentials on your VM:
+
+   ```terminal
+   ssh <vm-user>@<vm-ip>
+   cd ~/se-toolkit-lab-6
+   cp .env.agent.example .env.agent.secret
+   nano .env.agent.secret
+   ```
+
+   Fill in the same `LLM_API_KEY`, `LLM_API_BASE`, and `LLM_MODEL` values.
+
+> [!IMPORTANT]
+> **Two distinct keys:** `LMS_API_KEY` (in `.env.docker.secret`) protects your backend API endpoints. `LLM_API_KEY` (in `.env.agent.secret`) authenticates with your LLM provider. Don't mix them up.
+
 ----
 
-🎉 Congrats! Your system is deployed with data. Now go to the [tasks](../../README.md#tasks).
+You're all set. Now go to the [tasks](../../README.md#tasks).

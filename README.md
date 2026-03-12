@@ -18,7 +18,7 @@ The lab gets updated regularly, so do [sync your fork with the upstream](https:/
 
 You've used AI agents throughout the course — now you'll build one from scratch.
 
-You have a running Learning Management Service — a backend, a database, and a frontend dashboard. You'll build a **CLI agent** that answers questions about the course and about your own system, and then evaluate the agent against a benchmark.
+You have a running Learning Management Service — a backend, a database full of analytics data, and a frontend dashboard. Your project has a wiki full of documentation that nobody reads. You will build a CLI agent that reads the docs for you, answers questions about the course, connects to the live system to do something actually useful, and then prove it works against a benchmark.
 
 ## Learning advice
 
@@ -61,8 +61,8 @@ In simple words, you should be able to say:
 
 ### Required
 
-1. [Call an LLM from code](./lab/tasks/required/task-1.md#call-an-llm-from-code)
-2. [Add tools](./lab/tasks/required/task-2.md#add-tools)
+1. [The documentation agent](./lab/tasks/required/task-1.md#the-documentation-agent)
+2. [The system agent](./lab/tasks/required/task-2.md#the-system-agent)
 3. [Pass the benchmark](./lab/tasks/required/task-3.md#pass-the-benchmark)
 
 ### Optional (recommended)

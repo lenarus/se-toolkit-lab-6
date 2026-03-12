@@ -1,158 +1,163 @@
-# Add Tools
+# The System Agent
 
-In Task 1 you built a CLI that calls an LLM — but it can only answer from the knowledge baked into its training data or your system prompt. It cannot look at your actual code or query your running API. That is the difference between a chatbot and an **agent**: an agent has **tools** — functions it can call to interact with the real world, then reason about the results.
+<h4>Time</h4>
 
-In this task you will give your agent three tools (`read_file`, `list_files`, `query_api`) and build the **agentic loop**: the LLM decides which tool to call, your code executes it, feeds the result back, and the LLM decides what to do next — call another tool or give the final answer.
+~90 min
 
-## [Git workflow](../../../wiki/git-workflow.md)
+<h4>Purpose</h4>
 
-1. Create an issue titled `[Task] Add Tools`.
-2. Pull latest `main` from `origin` and `upstream`.
-3. Create a branch from `main` (e.g., `task/add-tools`).
-4. Work on the branch. Commit as you go using [conventional commits](https://www.conventionalcommits.org/) (e.g., `feat:`, `docs:`, `test:`).
-5. Push, create a PR to `main` in **your fork** (not upstream). Link the issue using a keyword (e.g., `Closes #2`).
-6. Get a review from your partner, merge (this closes the issue automatically), delete the branch.
+Connect the agent to your live system so it can query the API and answer questions about the actual deployment.
 
-## What you will build
+<h4>Context</h4>
 
-An agentic loop: the LLM can request tool calls, your agent executes them and feeds the results back, repeating until the LLM gives a final answer.
+In Task 1 you built an agent that reads documentation. But documentation can be outdated — the real system is the source of truth. In this task you will give your agent a new tool (`query_api`) so it can talk to your deployed backend, and teach it to answer two new kinds of questions: static system facts (framework, ports, status codes) and data-dependent queries (item count, scores).
+
+<h4>Diagram</h4>
 
 ```mermaid
 sequenceDiagram
     actor User
     participant CLI as agent.py
-    participant LLM as LLM API
+    participant LLM as LLM API<br/>(OpenRouter)
     participant Tools as Tools<br/>(files, API)
 
     User->>CLI: python agent.py "..."
     CLI->>LLM: messages + tool definitions
-    LLM-->>CLI: tool_calls: [{read_file, ...}]
-    CLI->>Tools: execute read_file(path)
-    Tools-->>CLI: file contents
+    LLM-->>CLI: tool_calls: [{query_api, ...}]
+    CLI->>Tools: execute query_api(GET, /items/)
+    Tools-->>CLI: {"status_code": 200, "body": "[...]"}
     CLI->>LLM: tool result
-    LLM-->>CLI: {"content": "The answer is..."}
+    LLM-->>CLI: final answer
     CLI->>User: {"answer": "...", "tool_calls": [...]}
 ```
 
-## CLI interface
+<h4>Table of contents</h4>
 
-Same as Task 1. The only change: `tool_calls` is now populated.
+- [1. Steps](#1-steps)
+  - [1.1. Follow the `Git workflow`](#11-follow-the-git-workflow)
+  - [1.2. Create a `Lab Task` issue](#12-create-a-lab-task-issue)
+  - [1.3. Write a plan](#13-write-a-plan)
+  - [1.4. Add the `query_api` tool](#14-add-the-query_api-tool)
+    - [1.4.1. Define the tool schema](#141-define-the-tool-schema)
+    - [1.4.2. Implement the tool](#142-implement-the-tool)
+  - [1.5. Update the system prompt](#15-update-the-system-prompt)
+  - [1.6. Test with the benchmark](#16-test-with-the-benchmark)
+  - [1.7. Update documentation](#17-update-documentation)
+  - [1.8. Write regression tests](#18-write-regression-tests)
+  - [1.9. Deploy to your VM](#19-deploy-to-your-vm)
+  - [1.10. Finish the task](#110-finish-the-task)
+  - [1.11. Check the task using the autochecker](#111-check-the-task-using-the-autochecker)
+- [2. Acceptance criteria](#2-acceptance-criteria)
 
-**Input:**
+## 1. Steps
 
-```bash
-python agent.py "What framework does the backend use?"
-```
+### 1.1. Follow the `Git workflow`
 
-**Output:**
+Follow the [`Git workflow`](../../../wiki/git-workflow.md) to complete this task.
 
-```json
-{
-  "answer": "The backend uses FastAPI.",
-  "tool_calls": [
-    {"tool": "read_file", "args": {"path": "backend/app/main.py"}, "result": "from fastapi import FastAPI..."}
-  ]
-}
-```
+### 1.2. Create a `Lab Task` issue
 
-**Rules (same as Task 1):**
+Title: `[Task] The System Agent`
 
-- `answer` and `tool_calls` fields are required.
-- Each entry in `tool_calls` must have `tool`, `args`, and `result`.
-- Only valid JSON goes to stdout. All debug/progress output goes to **stderr**.
-- The agent must respond within 60 seconds.
-- Maximum 10 tool calls per question.
-- Exit code 0 on success.
-
-## Required tools
-
-You must implement three tools and register them as function-calling schemas in your LLM request.
-
-### `read_file`
-
-Read a file from the project repository.
-
-- **Parameters:** `path` (string) — relative path from project root.
-- **Returns:** file contents as a string, or an error message if the file doesn't exist.
-- **Security:** must not read files outside the project directory.
-
-### `list_files`
-
-List files and directories at a given path.
-
-- **Parameters:** `path` (string) — relative directory path from project root.
-- **Returns:** newline-separated listing of entries.
-- **Security:** must not list directories outside the project directory.
-
-### `query_api`
-
-Call your deployed backend API.
-
-- **Parameters:** `method` (string — GET, POST, etc.), `path` (string — e.g., `/items`), `body` (string, optional — JSON request body).
-- **Returns:** JSON string with `status_code` and `body`.
-- **Authentication:** use `LMS_API_KEY` from `.env.docker.secret` (the backend key, not the LLM key).
-
-## The agentic loop
-
-Your agent should follow this pattern:
-
-1. Send the user's question + tool definitions to the LLM.
-2. If the LLM responds with `tool_calls` → execute each tool, append results as `tool` role messages, go to step 1.
-3. If the LLM responds with a text message (no tool calls) → that's the final answer. Output JSON and exit.
-4. If you hit 10 tool calls → stop looping, use whatever answer you have.
-
-## Deliverables
-
-### 1. Plan (`plans/task-2.md`)
+### 1.3. Write a plan
 
 Before writing code, create `plans/task-2.md`. Describe:
 
-- How you will define tool schemas (JSON format for the LLM).
-- How you will implement the agentic loop (detect tool calls, execute, feed back).
-- How you will handle security (path restriction, API authentication).
+- How you will define the `query_api` tool schema.
+- How you will handle authentication (`LMS_API_KEY`).
+- How you will update the system prompt so the LLM knows when to use wiki tools vs the API tool.
 
 Commit:
 
 ```text
-docs: add implementation plan for tool calling
+docs: add implementation plan for system agent
 ```
 
-### 2. Tools and agentic loop (update `agent.py`)
+### 1.4. Add the `query_api` tool
 
-Update `agent.py` to:
+- [1.4.1. Define the tool schema](#141-define-the-tool-schema)
+- [1.4.2. Implement the tool](#142-implement-the-tool)
 
-- Define `read_file`, `list_files`, and `query_api` as function-calling schemas.
-- Implement the agentic loop (tool call → execute → feed result → repeat).
-- Record all tool calls in the `tool_calls` output array.
+#### 1.4.1. Define the tool schema
+
+Add `query_api` to your tool definitions in the LLM API request.
+
+**`query_api`** — Call the deployed backend API.
+
+- **Parameters:**
+  - `method` (string) — HTTP method (GET, POST, etc.).
+  - `path` (string) — API path (e.g., `/items/`).
+  - `body` (string, optional) — `JSON` request body.
+- **Returns:** `JSON` string with `status_code` and `body`.
+
+#### 1.4.2. Implement the tool
+
+Implement the `query_api` function. It should:
+
+1. Read `LMS_API_KEY` from `.env.docker.secret`.
+2. Make an HTTP request to the backend at `http://localhost:42002` (or a configurable base URL).
+3. Include the `Authorization: Bearer <LMS_API_KEY>` header.
+4. Return the response as `JSON` with `status_code` and `body` fields.
+
+> [!NOTE]
+> **Two distinct keys:** `LMS_API_KEY` (in `.env.docker.secret`) protects your backend endpoints. `LLM_API_KEY` (in `.env.agent.secret`) authenticates with your LLM provider. Don't mix them up.
 
 Commit:
 
 ```text
-feat: add tool calling (read_file, list_files, query_api)
+feat: add query_api tool for system queries
 ```
 
-### 3. Documentation (update `AGENT.md`)
+### 1.5. Update the system prompt
+
+Update your system prompt so the LLM knows:
+
+- When to use wiki tools (questions about course concepts, documentation).
+- When to use `query_api` (questions about the running system, live data, status codes).
+- When to use `read_file` on source code (questions about implementation details like which framework, ORM, etc.).
+
+### 1.6. Test with the benchmark
+
+Run the benchmark again. It now includes system questions in addition to wiki questions:
+
+```terminal
+python run_eval.py
+```
+
+New question types you will see:
+
+- **Static system facts:** "What framework does the backend use?" — the answer is in the source code and never changes.
+- **Data-dependent queries:** "How many items are in the database?" — the answer depends on your data.
+
+When a question fails, the benchmark shows a **feedback hint** that guides you toward the right approach without revealing the exact expected answer:
+
+```
+  ✗ [18/26] What HTTP status code does the API return without authentication?
+    feedback: Try making a request without the API key header and check the response status code.
+```
+
+### 1.7. Update documentation
 
 Update `AGENT.md` to document:
 
-- **Tools:** what each tool does, its parameters, and security constraints.
-- **Agentic loop:** how the loop works (when it calls tools, when it stops).
-- **Configuration:** any new environment variables needed (e.g., API base URL for `query_api`).
+- **Tools:** what `query_api` does, its parameters, and authentication.
+- **System prompt updates:** how the LLM decides between wiki and system tools.
+- **Configuration:** the `LMS_API_KEY` environment variable needed for `query_api`.
 
 Commit:
 
 ```text
-docs: update agent documentation with tool calling
+docs: update agent documentation with system tools
 ```
 
-### 4. Tests (5 tests)
+### 1.8. Write regression tests
 
-Add 5 regression tests that verify tool calling works. Each test should:
+Add 5 regression tests for tool calling. Each test should:
 
-- Run `agent.py` as a subprocess with a question that requires a tool.
-- Parse the stdout JSON.
-- Check that `tool_calls` is non-empty and contains the expected tool name.
-- Check that the answer is reasonable.
+1. Run `agent.py` as a subprocess with a question that requires a tool.
+2. Parse the stdout `JSON`.
+3. Check that `tool_calls` is non-empty and contains the expected tool name.
+4. Check that the answer is reasonable.
 
 Example test questions:
 
@@ -163,30 +168,47 @@ Example test questions:
 Commit:
 
 ```text
-test: add regression tests for tool calling
+test: add regression tests for system agent tools
 ```
 
-### 5. Deployment
+### 1.9. Deploy to your VM
 
-Deploy the updated agent to your VM. The autochecker will SSH in and run questions that require tools.
+Deploy the updated agent to your VM.
 
-Make sure:
+1. Push your branch and pull on the VM.
+2. Make sure both `.env.agent.secret` (LLM key) and `.env.docker.secret` (backend API key) are configured.
+3. Make sure the backend is running and reachable from `agent.py`.
 
-- The project repo is accessible to `agent.py` on the VM.
-- `LMS_API_KEY` is available for `query_api` to authenticate with the backend.
-- The backend is running and reachable from `agent.py`.
+4. Verify the agent can query the API:
 
-## Acceptance criteria
+   ```terminal
+   python agent.py "How many items are in the database?"
+   ```
+
+   You should see `query_api` in the tool_calls and a numeric answer.
+
+### 1.10. Finish the task
+
+1. [Create a PR](../../../wiki/git-workflow.md#create-a-pr) with your changes.
+2. [Get a PR review](../../../wiki/git-workflow.md#get-a-pr-review) and complete the subsequent steps in the `Git workflow`.
+
+### 1.11. Check the task using the autochecker
+
+[Check the task using the autochecker `Telegram` bot](../../../wiki/autochecker.md#check-the-task-using-the-autochecker-bot).
+
+---
+
+## 2. Acceptance criteria
 
 - [ ] Issue has the correct title.
 - [ ] `plans/task-2.md` exists with the implementation plan (committed before code).
-- [ ] `agent.py` defines `read_file`, `list_files`, and `query_api` as tool schemas.
-- [ ] The agentic loop executes tool calls and feeds results back to the LLM.
-- [ ] `tool_calls` in the output is populated when tools are used.
-- [ ] Tools do not access files outside the project directory.
+- [ ] `agent.py` defines `query_api` as a function-calling schema.
 - [ ] `query_api` authenticates with `LMS_API_KEY`.
-- [ ] `AGENT.md` documents the tools and agentic loop.
+- [ ] The agent answers static system questions correctly (framework, ports, status codes).
+- [ ] The agent answers data-dependent questions with plausible values.
+- [ ] `AGENT.md` documents the `query_api` tool and system prompt updates.
 - [ ] 5 tool-calling regression tests exist and pass.
-- [ ] The agent works on the VM via SSH.
+- [ ] The agent works on the VM via `SSH`.
+- [ ] The benchmark passes all Task 1 and Task 2 questions locally.
 - [ ] PR is approved and merged.
 - [ ] Issue is closed by the PR.
