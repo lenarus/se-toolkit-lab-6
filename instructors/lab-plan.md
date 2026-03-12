@@ -515,12 +515,17 @@ This is a better model of real-world debugging (errors are often silent to the u
 - [x] Write Class D questions (2 bug diagnosis chains, bot-only).
 - [x] Add `check_tools` / tool chain checking to engine.
 - [x] Add exception handler in `main.py` for visible error responses.
+- [x] Write Class E questions (3 LLM-judged reasoning, bot-only).
+- [x] Add `llm_judge` checking to engine (uses OpenRouter, gemini-2.5-flash-lite).
+- [x] Deploy autochecker with Class D/E questions and LLM judge.
+
+**Remaining (high priority):**
+
+- [ ] **Replace tier 1 conceptual questions with Class A wiki-lookup questions.** Current tier 1 (index 0-16) tests LLM knowledge, not wiki tools. Need questions with `expected_source` and `check_tools: [read_file]` that verify the documentation agent actually navigates the wiki. Requires wiki content to exist first.
+- [ ] Audit existing wiki content — what's there, what's missing.
+- [ ] Write missing wiki sections (labs 1-6 material).
 
 **Remaining:**
 
-- [ ] Audit existing wiki content — what's there, what's missing.
-- [ ] Write missing wiki sections (labs 1-6 material).
-- [ ] Review eval questions against current task structure (tier 1 conceptual questions may need updating).
-- [ ] Write Class E questions (LLM-judged reasoning, ~3-5 hidden).
-- [ ] Add `llm_judge` checking to engine (with budget control).
 - [ ] Deploy updated backend with planted bugs to student VMs.
+- [ ] Add logging framework to backend + `/logs` endpoint (future — see planted bugs section).
