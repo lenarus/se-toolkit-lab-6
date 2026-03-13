@@ -376,9 +376,22 @@ If you can't [connect to your VM](../../wiki/vm.md#connect-to-the-vm), complete 
    docker compose --env-file .env.docker.secret up --build -d
    ```
 
-   <h4>Image pull fails</h4>
+   <h4>Image pull fails or DNS resolution errors (<code>getaddrinfo EAI_AGAIN</code>)</h4>
 
-   Check your internet connection. If you are behind a proxy, configure `Docker` to use it.
+   If you see DNS errors like `getaddrinfo EAI_AGAIN registry.npmjs.org`, Docker can't resolve domain names. This is a university network DNS issue. Add Google DNS to Docker:
+
+   ```terminal
+   sudo tee /etc/docker/daemon.json <<'EOF'
+   {
+     "dns": ["8.8.8.8", "8.8.4.4"]
+   }
+   EOF
+   sudo systemctl restart docker
+   ```
+
+   Then run the `docker compose up` command again.
+
+   If that still doesn't work, check your internet connection. If you are behind a proxy, configure `Docker` to use it.
 
    </details>
 

@@ -135,6 +135,21 @@ We refer to your fork as `fork` and to the original repo as `upstream`.
    docker compose --env-file .env.docker.secret up --build -d
    ```
 
+   <h4>DNS resolution errors (<code>getaddrinfo EAI_AGAIN</code>)</h4>
+
+   If you see DNS errors like `getaddrinfo EAI_AGAIN registry.npmjs.org`, Docker can't resolve domain names. This is a university network DNS issue. Add Google DNS to Docker:
+
+   ```terminal
+   sudo tee /etc/docker/daemon.json <<'EOF'
+   {
+     "dns": ["8.8.8.8", "8.8.4.4"]
+   }
+   EOF
+   sudo systemctl restart docker
+   ```
+
+   Then run the `docker compose up` command again.
+
    </details>
 
 ### 1.4. Populate the database
