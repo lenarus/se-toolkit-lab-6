@@ -49,3 +49,4 @@ Notes
 - Use standard Python libs + `requests` (or stdlib `urllib.request`) to avoid heavy deps.
 - Keep implementation minimal and robust; augment prompts and tools in
 - fixing branch
+- fixing branch 2
