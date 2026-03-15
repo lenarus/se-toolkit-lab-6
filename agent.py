@@ -478,8 +478,24 @@ def main():
                 declared = {"function": {"name": name, "arguments": args}}
                 messages.append({"role": "assistant", "tool_calls": [declared]})
                 messages.append({"role": "tool", "name": name, "content": result})
-                continue
+    
             
+            # Format 2: <function name="list_files">
+            # <parameter name="path">...</parameter>
+            # </function>
+            func_match = re.search(r'<function name="([^"]+)">.*?<parameter name="path">([^<]+)</parameter>.*?</function>', content, re.DOTALL)
+            if func_match:
+                name = func_match.group(1).strip()
+                path = func_match.group(2).strip()
+                args = {"path": path}
+                result = execute_tool(name, args, project_root)
+                call_count += 1
+                tool_calls.append({"tool": name, "args": args, "result": result})
+                declared = {"function": {"name": name, "arguments": args}}
+                messages.append({"role": "assistant", "tool_calls": [declared]})
+                messages.append({"role": "tool", "name": name, "content": result})
+                continue
+
             # Fallback: if the model emitted a pseudo-tool call as text like:
             #   list_files(path='wiki')  or  read_file("wiki/git-workflow.md")
             m = re.match(
