@@ -304,7 +304,7 @@ def main():
         "You are a helpful assistant that can inspect the repository using two tools: "
         "list_files(path) and read_file(path), and query runtime backend state using query_api(method, path, body). "
         "Use list_files to discover files and read_file to read file contents. Use query_api for runtime facts "
-        "(counts, current status, endpoints). When you want the program to run a tool, emit a function call using the declared schema. "
+        "(counts, current status, endpoints). IMPORTANT: When you want to use a tool, emit a proper function call using the declared schema - do NOT write XML or text-based tool calls. "
         "Examples: if you need the number of items call query_api(method='GET', path='/items/'). "
         "When finished, return a concise answer and include the source as 'Source: <path>' or 'Source: api:<path>' where appropriate."
     )
@@ -369,8 +369,15 @@ def main():
             print("LLM response missing message field", file=sys.stderr)
             sys.exit(1)
 
-        # If the model requested a function call
+        # Handle both function_call and tool_calls formats (Qwen)
         function_call = msg.get("function_call")
+        tool_calls_raw = msg.get("tool_calls")
+        if tool_calls_raw and isinstance(tool_calls_raw, list) and len(tool_calls_raw) > 0:
+            tc = tool_calls_raw[0]
+            if isinstance(tc, dict):
+                func_info = tc.get("function", {})
+                if func_info:
+                    function_call = {"name": func_info.get("name"), "arguments": func_info.get("arguments", "{}")}
         if function_call:
             name = function_call.get("name")
             args_text = function_call.get("arguments", "{}")
@@ -402,7 +409,9 @@ def main():
             # Record the tool call
             tool_calls.append({"tool": name, "args": args, "result": result})
 
-            # Append tool result as a tool-role message for the model to consume
+            # Qwen-compatible: assistant declares tool_calls first
+            declared = {"function": {"name": name, "arguments": args}}
+            messages.append({"role": "assistant", "tool_calls": [declared]})
             messages.append({"role": "tool", "name": name, "content": result})
             # Continue the loop so the model can respond after seeing the tool output
             continue
@@ -441,12 +450,32 @@ def main():
                         result = f"ERROR: unknown tool {name}"
                     call_count += 1
                     tool_calls.append({"tool": name, "args": args, "result": result})
+                    declared = {"function": {"name": name, "arguments": args}}
+                    messages.append({"role": "assistant", "tool_calls": [declared]})
                     messages.append({"role": "tool", "name": name, "content": result})
                     continue
             except Exception:
                 # not JSON or malformed — fall through to other fallbacks
                 pass
 
+            # Fallback: XML-style function calls
+            # Format 1: <function_call>\n<name>...</name>\n<arguments>...</arguments>\n</function_call>
+            xml_match = re.search(r'<function_call>.*?<name>([^<]+)</name>.*?<arguments>([^<]+)</arguments>.*?</function_call>', content, re.DOTALL)
+            if xml_match:
+                name = xml_match.group(1).strip()
+                args_text = xml_match.group(2).strip()
+                try:
+                    args = json.loads(args_text) if args_text else {}
+                except Exception:
+                    args = {}
+                result = execute_tool(name, args, project_root)
+                call_count += 1
+                tool_calls.append({"tool": name, "args": args, "result": result})
+                declared = {"function": {"name": name, "arguments": args}}
+                messages.append({"role": "assistant", "tool_calls": [declared]})
+                messages.append({"role": "tool", "name": name, "content": result})
+                continue
+            
             # Fallback: if the model emitted a pseudo-tool call as text like:
             #   list_files(path='wiki')  or  read_file("wiki/git-workflow.md")
             m = re.match(
@@ -505,6 +534,9 @@ def main():
                         "result": result,
                     }
                 )
+                declared_args = {"path": path_arg, "body": body_arg} if name == "query_api" else {"path": path_arg}
+                declared = {"function": {"name": name, "arguments": declared_args}}
+                messages.append({"role": "assistant", "tool_calls": [declared]})
                 messages.append({"role": "tool", "name": name, "content": result})
                 # continue the loop so the model can respond after seeing the tool output
                 continue
