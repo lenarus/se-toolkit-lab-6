@@ -294,6 +294,10 @@ def main():
                         "type": "string",
                         "description": "Optional JSON string payload for POST/PUT requests",
                     },
+                    "include_auth": {
+                        "type": "boolean",
+                        "description": "Whether to include LMS_API_KEY header (default true). Set to false to test unauthenticated access.",
+                    },
                 },
                 "required": ["method", "path"],
             },

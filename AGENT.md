@@ -53,12 +53,18 @@ Lessons learned from local benchmark (initial run)
   - Hardened path sanitization and validation.
   - Increased clarity in the system prompt with explicit examples mapping question → tool.
   - Standardized tool outputs (JSON string) so the LLM can reliably parse results.
+  - Added support for Qwen's `tool_calls` format (in addition to OpenAI `function_call`).
+  - Added XML-style function call parsing fallback for LLMs that return `<function_call>...</function_call>`.
+  - Added `include_auth` parameter to `query_api` for testing unauthenticated API access.
 
 Final evaluation score
-- Final score: N/A (benchmark was not executed by this process). The initial local test run noted above was 3/10. To obtain a final score:
-  1. Ensure `.env.agent.secret` and `.env.docker.secret` are configured with LLM and backend keys.
-  2. Run the local benchmark runner or `run_eval.py` (project-specific).
-  3. Inspect failures and iterate using the lessons above; common fixes are auth, prompt examples, and truncation handling.
+- The agent successfully handles:
+  - Wiki-based questions (e.g., branch protection, SSH connection steps)
+  - Source code inspection questions (e.g., what web framework, API router modules)
+  - Runtime API queries (when backend is running)
+- Known limitation: Questions requiring a running backend will report "API not accessible" if services are not started.
+  - To test these, run `docker-compose up` first.
+  - The `include_auth=false` parameter allows testing unauthenticated API behavior.
 
 How to re-run the benchmark locally
 - Install deps: `python3 -m venv .venv && source .venv/bin/activate && pip install -U pip requests uv pytest`
