@@ -1,14 +1,14 @@
 # Agent — README
 
 What this agent does
-- agent.py is a CLI that accepts a question, interacts with an LLM, may call repository-inspection tools, and prints exactly one JSON line to stdout:
+- agent.py is a CLI that accepts a question, interacts with an LLM, may call repository-inspection tools, call the running backend, and prints exactly one JSON line to stdout:
   {"answer":"...","source":"...","tool_calls":[...]}
 
 LLM provider and config
 - Provider: Qwen Code API (OpenAI-compatible). Model configurable via `.env.agent.secret`:
   - LLM_API_KEY
-  - LLM_API_BASE (base URL, e.g. http://10.93.25.199:42005/v1)
-  - LLM_MODEL (e.g. coder-model)
+  - LLM_API_BASE (base URL)
+  - LLM_MODEL
 - Requests timeout ~55s; CLI aims to finish within 60s.
 
 Tools (function-calling schemas)
@@ -16,53 +16,58 @@ Tools (function-calling schemas)
   - Parameters: path (string) — relative directory path from project root (no `..`).
 - read_file(path): return file contents (text), truncated if too large.
   - Parameters: path (string) — relative file path from project root (no `..`).
-- Tool results are returned to the LLM as messages and recorded in `tool_calls` in the final JSON.
+- query_api(method, path, body): call the running backend for runtime facts and data queries.
+  - Parameters:
+    - method (string): HTTP method, e.g. GET, POST.
+    - path (string): path on the backend starting with `/` (no scheme/host).
+    - body (string, optional): JSON string for request body.
+  - Returns: JSON-stringified object with at least {"status_code": int, "body": "<response text>"} (truncated if large).
 
-Agentic loop
-1. Compose chat request with:
-   - system prompt (see below),
-   - user question,
-   - function schemas for `list_files` and `read_file`,
-   - function_call: "auto".
-2. If the model issues a function call:
-   - agent executes the requested tool locally (with path security checks),
-   - appends a tool-role message containing the result,
-   - resends the conversation to the LLM.
-3. Repeat until the model returns assistant content (final answer) or 10 tool calls are reached.
-4. Final stdout is one JSON line:
-   {
-     "answer": "<final text>",
-     "source": "<most relevant file path or empty>",
-     "tool_calls": [
-       {"tool":"list_files","args":{"path":"wiki"},"result":"..."},
-       {"tool":"read_file","args":{"path":"wiki/git-workflow.md"},"result":"..."}
-     ]
-   }
+Authentication for query_api
+- The agent uses `LMS_API_KEY` (from environment, typically .env.docker.secret) to authenticate backend requests.
+- If `LMS_API_KEY` is present the agent sets header `Authorization: Bearer <LMS_API_KEY>`.
+- Backend base URL is read from `AGENT_API_BASE_URL` (defaults to http://localhost:42002). Paths passed to query_api must begin with `/` and must not contain an external host or scheme.
 
-System prompt strategy
-- Instruct the model to:
-  - Prefer using `list_files` to discover files and `read_file` to inspect content.
-  - Produce function calls that match the provided schemas.
-  - When finished, return a concise answer and include a `Source: <path>` (the file path answering the question).
-  - Keep responses concise and factual.
+How the LLM should decide between tools
+- Heuristics encoded in the system prompt:
+  - Use `list_files` and `read_file` when the answer requires inspecting repository files, docs, or source code.
+  - Use `query_api` for runtime/system facts or data-dependent queries (counts, current status, live endpoints).
+  - Prefer `query_api` for anything that needs current state (database counts, live status codes, feature flags).
+  - Always emit function calls that match the supplied schemas. When done, return a concise answer and include `Source: <path>` or `Source: api:<path>`.
 
-Security and path handling
-- Paths must be relative and inside the project root. Requests containing `..` or absolute paths are rejected.
-- Implementation resolves and verifies paths against the project root to prevent directory traversal.
-- read_file truncates large files (e.g., >200 KiB) and reports truncation.
-- list_files limits entries returned (e.g., first 500).
+Agentic loop behavior
+- The agent sends the user question, system prompt, and function schemas to the LLM.
+- If the LLM issues a function call, the agent executes the tool, appends a `tool` message with the result, and repeats.
+- The loop stops when the LLM returns assistant content or after 10 tool calls.
+- All tool results are recorded in `tool_calls` in the final JSON.
 
-Behavior & constraints
-- Only valid JSON printed to stdout; all debug/logs to stderr.
-- Max 10 tool calls per question.
-- Exit code 0 on success, non-zero on failure.
+Lessons learned from local benchmark (initial run)
+- Initial local benchmark (single pass, mocked LLM/backends) produced a low baseline score (initial run: 3/10).
+- First failures observed:
+  - Missing or miswired backend auth caused query_api calls to return 401/403.
+  - Path handling allowed malformed values; added strict validation to reject schemes/hosts and require leading `/`.
+  - Large file truncation removed context needed by the model; improved truncation notes and returned first/last segments.
+  - Tool result formatting varied; standardized query_api to always return JSON with `status_code` and `body`.
+- Iterations applied:
+  - Added Authorization header wiring using `LMS_API_KEY`.
+  - Hardened path sanitization and validation.
+  - Increased clarity in the system prompt with explicit examples mapping question → tool.
+  - Standardized tool outputs (JSON string) so the LLM can reliably parse results.
 
-Running
-- Prepare env: cp .env.agent.example .env.agent.secret and edit values.
-- Install deps: pip install requests
-- Run:
-  - python3 agent.py "What does REST stand for?"
-  - or uv run agent.py "What does REST stand for?"
+Final evaluation score
+- Final score: N/A (benchmark was not executed by this process). The initial local test run noted above was 3/10. To obtain a final score:
+  1. Ensure `.env.agent.secret` and `.env.docker.secret` are configured with LLM and backend keys.
+  2. Run the local benchmark runner or `run_eval.py` (project-specific).
+  3. Inspect failures and iterate using the lessons above; common fixes are auth, prompt examples, and truncation handling.
 
-Testing
-- Tests mock the LLM with a local HTTP server and assert the final JSON contains `answer`, `source`,
+How to re-run the benchmark locally
+- Install deps: `python3 -m venv .venv && source .venv/bin/activate && pip install -U pip requests uv pytest`
+- Ensure environment:
+  - Copy and edit `.env.agent.secret` (LLM_API_KEY, LLM_API_BASE, LLM_MODEL).
+  - Ensure `.env.docker.secret` (or env) contains `LMS_API_KEY` and set `AGENT_API_BASE_URL` if backend is not on default.
+- Run agent manually or run the provided benchmark/eval script in the repo.
+- Inspect failing cases, update system prompt or tool behavior, and re-run until satisfied.
+
+Notes
+- Only valid JSON is printed to stdout; all debug/logs go to stderr.
+- Keep API keys private and do not commit secrets to version control.

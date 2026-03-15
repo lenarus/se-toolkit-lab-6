@@ -3,6 +3,9 @@ import os
 import sys
 import json
 import pathlib
+import re
+import logging
+import os
 
 try:
     import requests
@@ -12,6 +15,30 @@ except Exception:
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+# configure logger early in main (or module top)
+logger = logging.getLogger("agent")
+if os.environ.get("AGENT_DEBUG"):
+    logging.basicConfig(level=logging.DEBUG, format="%(message)s")
+else:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+
+def _sanitize_payload_for_log(payload):
+    try:
+        p = json.loads(json.dumps(payload))  # deep copy-ish
+    except Exception:
+        return "<unserializable payload>"
+    # truncate long message contents
+    for m in p.get("messages", []):
+        if isinstance(m, dict) and "content" in m and isinstance(m["content"], str):
+            if len(m["content"]) > 500:
+                m["content"] = m["content"][:500] + "...(truncated)"
+    # remove or mask functions if desired
+    if "functions" in p:
+        p["functions"] = "[functions omitted]"
+    return json.dumps(p, ensure_ascii=False)
 
 
 def load_env_file(path):
@@ -111,6 +138,80 @@ def list_files_impl(project_root: pathlib.Path, rel_path: str) -> str:
         return f"ERROR: listing directory {rel_path}: {e}"
 
 
+# New: query_api implementation
+def query_api_impl(method: str, path: str, body: str | None) -> str:
+    # Configuration from environment
+    base = os.environ.get("AGENT_API_BASE_URL", "http://localhost:42002")
+    lms_key = os.environ.get("LMS_API_KEY")
+
+    # Basic sanitization
+    if not path or not isinstance(path, str) or not path.startswith("/"):
+        return f"ERROR: invalid path '{path}' (must start with '/')"
+    if "http://" in path or "https://" in path:
+        return (
+            f"ERROR: invalid path '{path}' (must be a relative path starting with '/')"
+        )
+
+    method_up = (method or "GET").upper()
+    allowed = {"GET", "POST", "PUT", "DELETE", "PATCH"}
+    if method_up not in allowed:
+        return f"ERROR: unsupported method '{method_up}'"
+
+    url = base.rstrip("/") + path
+
+    headers = {}
+    if body:
+        headers["Content-Type"] = "application/json"
+    if lms_key:
+        headers["Authorization"] = f"Bearer {lms_key}"
+
+    try:
+        resp = requests.request(
+            method_up,
+            url,
+            headers=headers,
+            data=body.encode("utf-8") if body else None,
+            timeout=10,
+        )
+    except requests.exceptions.RequestException as e:
+        return json.dumps(
+            {"status_code": 0, "body": f"ERROR: request failed: {e}"},
+            ensure_ascii=False,
+        )
+
+    # Try to decode/format body
+    max_bytes = 200 * 1024
+    try:
+        # Prefer JSON body if present
+        ct = resp.headers.get("Content-Type", "")
+        if "application/json" in ct:
+            try:
+                body_obj = resp.json()
+                body_str = json.dumps(body_obj, ensure_ascii=False)
+            except Exception:
+                body_str = resp.text
+        else:
+            body_str = resp.text
+    except Exception:
+        body_str = "<unable to decode body>"
+
+    truncated = False
+    if isinstance(body_str, str) and len(body_str.encode("utf-8")) > max_bytes:
+        # truncate to max_bytes safely
+        b = body_str.encode("utf-8")[:max_bytes]
+        try:
+            body_str = b.decode("utf-8", errors="replace")
+        except Exception:
+            body_str = b.decode("latin-1", errors="replace")
+        truncated = True
+
+    if truncated:
+        body_str = "(TRUNCATED) " + body_str
+
+    result = {"status_code": resp.status_code, "body": body_str}
+    return json.dumps(result, ensure_ascii=False)
+
+
 def main():
     # Load .env.agent.secret if present in project root
     here = os.path.dirname(os.path.abspath(__file__))
@@ -175,14 +276,37 @@ def main():
                 "required": ["path"],
             },
         },
+        {
+            "name": "query_api",
+            "description": "Send an HTTP request to the project backend. Use for runtime/system facts and data-dependent queries.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method, e.g. GET, POST",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path on backend starting with '/', e.g. /items/",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Optional JSON string payload for POST/PUT requests",
+                    },
+                },
+                "required": ["method", "path"],
+            },
+        },
     ]
 
     system_prompt = (
         "You are a helpful assistant that can inspect the repository using two tools: "
-        "list_files(path) and read_file(path). Use list_files to discover files and "
-        "read_file to read file contents. When you want the program to run a tool, "
-        "emit a function call using the declared schema. When finished, return a concise answer "
-        "and include the source file path as 'Source: <path>' or provide the most relevant file path."
+        "list_files(path) and read_file(path), and query runtime backend state using query_api(method, path, body). "
+        "Use list_files to discover files and read_file to read file contents. Use query_api for runtime facts "
+        "(counts, current status, endpoints). When you want the program to run a tool, emit a function call using the declared schema. "
+        "Examples: if you need the number of items call query_api(method='GET', path='/items/'). "
+        "When finished, return a concise answer and include the source as 'Source: <path>' or 'Source: api:<path>' where appropriate."
     )
 
     messages = [
@@ -207,11 +331,21 @@ def main():
             "function_call": "auto",
         }
 
+        # DEBUG: dump payload to stderr before sending
+        logger.debug("REQUEST PAYLOAD: %s", _sanitize_payload_for_log(payload))
+
         try:
             resp = requests.post(endpoint, headers=headers, json=payload, timeout=55)
         except requests.exceptions.RequestException as e:
-            print(f"LLM request failed: {e}", file=sys.stderr)
+            logger.error("LLM request failed: %s", e)
             sys.exit(1)
+
+        logger.debug("RESPONSE STATUS: %s", resp.status_code)
+        # log truncated body only
+        logger.debug(
+            "RESPONSE BODY: %s",
+            resp.text[:2000].replace(os.environ.get("LLM_API_KEY", ""), "[REDACTED]"),
+        )
 
         if resp.status_code != 200:
             print(
@@ -256,6 +390,12 @@ def main():
             elif name == "list_files":
                 path_arg = args.get("path", "")
                 result = list_files_impl(project_root, path_arg)
+            elif name == "query_api":
+                method = args.get("method", "GET")
+                path_arg = args.get("path", "")
+                body = args.get("body")
+                # validate and execute
+                result = query_api_impl(method, path_arg, body)
             else:
                 result = f"ERROR: unknown tool {name}"
 
@@ -270,6 +410,106 @@ def main():
         # Otherwise treat as final assistant content
         content = msg.get("content")
         if content:
+            # Handle provider that returns function_call embedded as JSON string in content
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, dict) and "function_call" in parsed:
+                    fc = parsed["function_call"]
+                    name = fc.get("name")
+                    args_text = fc.get("arguments", "{}")
+                    try:
+                        args = (
+                            json.loads(args_text)
+                            if isinstance(args_text, str)
+                            else args_text
+                        )
+                    except Exception:
+                        args = {}
+                    # execute same as function_call branch
+                    if name == "read_file":
+                        path_arg = args.get("path", "")
+                        result = read_file_impl(project_root, path_arg)
+                    elif name == "list_files":
+                        path_arg = args.get("path", "")
+                        result = list_files_impl(project_root, path_arg)
+                    elif name == "query_api":
+                        method = args.get("method", "GET")
+                        path_arg = args.get("path", "")
+                        body = args.get("body")
+                        result = query_api_impl(method, path_arg, body)
+                    else:
+                        result = f"ERROR: unknown tool {name}"
+                    call_count += 1
+                    tool_calls.append({"tool": name, "args": args, "result": result})
+                    messages.append({"role": "tool", "name": name, "content": result})
+                    continue
+            except Exception:
+                # not JSON or malformed — fall through to other fallbacks
+                pass
+
+            # Fallback: if the model emitted a pseudo-tool call as text like:
+            #   list_files(path='wiki')  or  read_file("wiki/git-workflow.md")
+            m = re.match(
+                r"^\s*(?P<name>list_files|read_file|query_api)\s*\(\s*(?P<args>.*)\s*\)\s*$",
+                content.strip(),
+            )
+            if m:
+                name = m.group("name")
+                args_text = m.group("args").strip()
+                # try to extract a simple "path='...'" or a single quoted arg
+                path_arg = ""
+                body_arg = None
+                # key=value style
+                kp = re.search(r"path\s*=\s*['\"](?P<p>[^'\"]+)['\"]", args_text)
+                if kp:
+                    path_arg = kp.group("p")
+                else:
+                    # single quoted positional arg
+                    kp2 = re.match(r"^['\"](?P<p>[^'\"]+)['\"]$", args_text)
+                    if kp2:
+                        path_arg = kp2.group("p")
+                # body for query_api: look for body=...
+                kb = re.search(r"body\s*=\s*(?P<b>.+)$", args_text)
+                if kb:
+                    body_raw = kb.group("b").strip()
+                    # try to strip surrounding quotes
+                    if (body_raw.startswith("'") and body_raw.endswith("'")) or (
+                        body_raw.startswith('"') and body_raw.endswith('"')
+                    ):
+                        body_arg = body_raw[1:-1]
+                    else:
+                        body_arg = body_raw
+
+                # execute the tool similarly to function_call branch
+                if name == "read_file":
+                    result = read_file_impl(project_root, path_arg)
+                elif name == "list_files":
+                    result = list_files_impl(project_root, path_arg)
+                elif name == "query_api":
+                    # allow method default GET if not provided
+                    method_m = re.search(
+                        r"method\s*=\s*['\"](?P<m>[^'\"]+)['\"]", args_text
+                    )
+                    method = method_m.group("m") if method_m else "GET"
+                    result = query_api_impl(method, path_arg, body_arg)
+                else:
+                    result = f"ERROR: unknown tool {name}"
+
+                call_count += 1
+                tool_calls.append(
+                    {
+                        "tool": name,
+                        "args": {"path": path_arg, "body": body_arg}
+                        if name == "query_api"
+                        else {"path": path_arg},
+                        "result": result,
+                    }
+                )
+                messages.append({"role": "tool", "name": name, "content": result})
+                # continue the loop so the model can respond after seeing the tool output
+                continue
+
+            # Otherwise treat as final text answer
             final_answer = content.strip()
             break
 
@@ -277,7 +517,7 @@ def main():
         print("LLM response did not contain function_call or content", file=sys.stderr)
         sys.exit(1)
 
-    # Determine source: prefer last read_file call path if present
+    # Determine source: prefer last read_file call path if present, else api path
     source = ""
     for c in reversed(tool_calls):
         if c.get("tool") == "read_file":
@@ -285,6 +525,11 @@ def main():
             if p:
                 source = p
                 break
+        if c.get("tool") == "query_api" and not source:
+            p = c.get("args", {}).get("path")
+            if p:
+                source = f"api:{p}"
+                # don't break yet in case a later read_file exists
 
     if final_answer is None:
         print("No final answer produced by LLM", file=sys.stderr)
