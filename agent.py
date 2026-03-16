@@ -139,9 +139,11 @@ def list_files_impl(project_root: pathlib.Path, rel_path: str) -> str:
 
 
 # New: query_api implementation
-def query_api_impl(method: str, path: str, body: str | None) -> str:
+def query_api_impl(
+    method: str, path: str, body: str | None, include_auth: bool = True
+) -> str:
     # Configuration from environment
-    base = os.environ.get("AGENT_API_BASE_URL", "http://localhost:42002")
+    base = os.environ.get("AGENT_API_BASE_URL", "http://10.93.25.199:42002")
     lms_key = os.environ.get("LMS_API_KEY")
 
     # Basic sanitization
@@ -162,7 +164,7 @@ def query_api_impl(method: str, path: str, body: str | None) -> str:
     headers = {}
     if body:
         headers["Content-Type"] = "application/json"
-    if lms_key:
+    if include_auth and lms_key:
         headers["Authorization"] = f"Bearer {lms_key}"
 
     try:
@@ -306,10 +308,11 @@ def main():
 
     system_prompt = (
         "You are a helpful assistant that can inspect the repository using two tools: "
-        "list_files(path) and read_file(path), and query runtime backend state using query_api(method, path, body). "
+        "list_files(path) and read_file(path), and query runtime backend state using query_api(method, path, body, include_auth). "
         "Use list_files to discover files and read_file to read file contents. Use query_api for runtime facts "
         "(counts, current status, endpoints). IMPORTANT: When you want to use a tool, emit a proper function call using the declared schema - do NOT write XML or text-based tool calls. "
         "Examples: if you need the number of items call query_api(method='GET', path='/items/'). "
+        "When the question asks about unauthenticated access or requests without headers, you MUST set include_auth=false in your query_api call. "
         "When finished, return a concise answer and include the source as 'Source: <path>' or 'Source: api:<path>' where appropriate."
     )
 
@@ -376,12 +379,19 @@ def main():
         # Handle both function_call and tool_calls formats (Qwen)
         function_call = msg.get("function_call")
         tool_calls_raw = msg.get("tool_calls")
-        if tool_calls_raw and isinstance(tool_calls_raw, list) and len(tool_calls_raw) > 0:
+        if (
+            tool_calls_raw
+            and isinstance(tool_calls_raw, list)
+            and len(tool_calls_raw) > 0
+        ):
             tc = tool_calls_raw[0]
             if isinstance(tc, dict):
                 func_info = tc.get("function", {})
                 if func_info:
-                    function_call = {"name": func_info.get("name"), "arguments": func_info.get("arguments", "{}")}
+                    function_call = {
+                        "name": func_info.get("name"),
+                        "arguments": func_info.get("arguments", "{}"),
+                    }
         if function_call:
             name = function_call.get("name")
             args_text = function_call.get("arguments", "{}")
@@ -405,8 +415,9 @@ def main():
                 method = args.get("method", "GET")
                 path_arg = args.get("path", "")
                 body = args.get("body")
+                include_auth = args.get("include_auth", True)
                 # validate and execute
-                result = query_api_impl(method, path_arg, body)
+                result = query_api_impl(method, path_arg, body, include_auth)
             else:
                 result = f"ERROR: unknown tool {name}"
 
@@ -449,7 +460,8 @@ def main():
                         method = args.get("method", "GET")
                         path_arg = args.get("path", "")
                         body = args.get("body")
-                        result = query_api_impl(method, path_arg, body)
+                        include_auth = args.get("include_auth", True)
+                        result = query_api_impl(method, path_arg, body, include_auth)
                     else:
                         result = f"ERROR: unknown tool {name}"
                     call_count += 1
@@ -464,7 +476,11 @@ def main():
 
             # Fallback: XML-style function calls
             # Format 1: <function_call>\n<name>...</name>\n<arguments>...</arguments>\n</function_call>
-            xml_match = re.search(r'<function_call>.*?<name>([^<]+)</name>.*?<arguments>([^<]+)</arguments>.*?</function_call>', content, re.DOTALL)
+            xml_match = re.search(
+                r"<function_call>.*?<name>([^<]+)</name>.*?<arguments>([^<]+)</arguments>.*?</function_call>",
+                content,
+                re.DOTALL,
+            )
             if xml_match:
                 name = xml_match.group(1).strip()
                 args_text = xml_match.group(2).strip()
@@ -478,12 +494,15 @@ def main():
                 declared = {"function": {"name": name, "arguments": args}}
                 messages.append({"role": "assistant", "tool_calls": [declared]})
                 messages.append({"role": "tool", "name": name, "content": result})
-    
-            
+
             # Format 2: <function name="list_files">
             # <parameter name="path">...</parameter>
             # </function>
-            func_match = re.search(r'<function name="([^"]+)">.*?<parameter name="path">([^<]+)</parameter>.*?</function>', content, re.DOTALL)
+            func_match = re.search(
+                r'<function name="([^"]+)">.*?<parameter name="path">([^<]+)</parameter>.*?</function>',
+                content,
+                re.DOTALL,
+            )
             if func_match:
                 name = func_match.group(1).strip()
                 path = func_match.group(2).strip()
@@ -540,7 +559,13 @@ def main():
                         r"method\s*=\s*['\"](?P<m>[^'\"]+)['\"]", args_text
                     )
                     method = method_m.group("m") if method_m else "GET"
-                    result = query_api_impl(method, path_arg, body_arg)
+                    include_auth_m = re.search(
+                        r"include_auth\s*=\s*(?P<ia>True|False)", args_text
+                    )
+                    include_auth = (
+                        include_auth_m.group("ia") == "True" if include_auth_m else True
+                    )
+                    result = query_api_impl(method, path_arg, body_arg, include_auth)
                 else:
                     result = f"ERROR: unknown tool {name}"
 
@@ -554,7 +579,11 @@ def main():
                         "result": result,
                     }
                 )
-                declared_args = {"path": path_arg, "body": body_arg} if name == "query_api" else {"path": path_arg}
+                declared_args = (
+                    {"path": path_arg, "body": body_arg}
+                    if name == "query_api"
+                    else {"path": path_arg}
+                )
                 declared = {"function": {"name": name, "arguments": declared_args}}
                 messages.append({"role": "assistant", "tool_calls": [declared]})
                 messages.append({"role": "tool", "name": name, "content": result})
