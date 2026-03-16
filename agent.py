@@ -313,6 +313,8 @@ def main():
         "(counts, current status, endpoints). IMPORTANT: When you want to use a tool, emit a proper function call using the declared schema - do NOT write XML or text-based tool calls. "
         "Examples: if you need the number of items call query_api(method='GET', path='/items/'). "
         "When the question asks about unauthenticated access or requests without headers, you MUST set include_auth=false in your query_api call. "
+        "Lab identifiers use the format 'lab-01', 'lab-02', etc. (with dash and zero-padded number). "
+        "Be efficient: use at most 2-3 tool calls, then provide your final answer. Do not keep calling tools indefinitely. "
         "When finished, return a concise answer and include the source as 'Source: <path>' or 'Source: api:<path>' where appropriate."
     )
 
@@ -323,7 +325,7 @@ def main():
 
     tool_calls = []
     final_answer = None
-    max_tool_calls = 10
+    max_tool_calls = 15
     call_count = 0
 
     while True:
