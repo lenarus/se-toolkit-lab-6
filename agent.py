@@ -434,9 +434,19 @@ def main():
         # Otherwise treat as final assistant content
         content = msg.get("content")
         if content:
+            # Strip markdown code blocks if present
+            content_stripped = content.strip()
+            if content_stripped.startswith("```json"):
+                content_stripped = content_stripped[7:]
+            elif content_stripped.startswith("```"):
+                content_stripped = content_stripped[3:]
+            if content_stripped.endswith("```"):
+                content_stripped = content_stripped[:-3]
+            content_stripped = content_stripped.strip()
+
             # Handle provider that returns function_call embedded as JSON string in content
             try:
-                parsed = json.loads(content)
+                parsed = json.loads(content_stripped)
                 if isinstance(parsed, dict) and "function_call" in parsed:
                     fc = parsed["function_call"]
                     name = fc.get("name")
@@ -464,6 +474,30 @@ def main():
                         result = query_api_impl(method, path_arg, body, include_auth)
                     else:
                         result = f"ERROR: unknown tool {name}"
+                    call_count += 1
+                    tool_calls.append({"tool": name, "args": args, "result": result})
+                    declared = {"function": {"name": name, "arguments": args}}
+                    messages.append({"role": "assistant", "tool_calls": [declared]})
+                    messages.append({"role": "tool", "name": name, "content": result})
+                    continue
+                # Handle direct JSON object with query_api fields (e.g., {"method": ..., "path": ...})
+                if (
+                    isinstance(parsed, dict)
+                    and "path" in parsed
+                    and parsed.get("path", "").startswith("/")
+                ):
+                    name = "query_api"
+                    method = parsed.get("method", "GET")
+                    path = parsed.get("path", "")
+                    body = parsed.get("body")
+                    include_auth = parsed.get("include_auth", True)
+                    result = query_api_impl(method, path, body, include_auth)
+                    args = {
+                        "method": method,
+                        "path": path,
+                        "body": body,
+                        "include_auth": include_auth,
+                    }
                     call_count += 1
                     tool_calls.append({"tool": name, "args": args, "result": result})
                     declared = {"function": {"name": name, "arguments": args}}
@@ -507,7 +541,15 @@ def main():
                 name = func_match.group(1).strip()
                 path = func_match.group(2).strip()
                 args = {"path": path}
-                result = execute_tool(name, args, project_root)
+                # Execute the tool based on name
+                if name == "read_file":
+                    result = read_file_impl(project_root, path)
+                elif name == "list_files":
+                    result = list_files_impl(project_root, path)
+                elif name == "query_api":
+                    result = query_api_impl("GET", path, None)
+                else:
+                    result = f"ERROR: unknown tool {name}"
                 call_count += 1
                 tool_calls.append({"tool": name, "args": args, "result": result})
                 declared = {"function": {"name": name, "arguments": args}}
