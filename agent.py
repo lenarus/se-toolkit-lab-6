@@ -480,6 +480,41 @@ def main():
                     messages.append({"role": "assistant", "tool_calls": [declared]})
                     messages.append({"role": "tool", "name": name, "content": result})
                     continue
+                # Handle direct JSON object with name/arguments (e.g., {"name": "list_files", "arguments": {...}})
+                if (
+                    isinstance(parsed, dict)
+                    and "name" in parsed
+                    and "arguments" in parsed
+                ):
+                    name = parsed.get("name")
+                    args = parsed.get("arguments", {})
+                    if name in ("read_file", "list_files", "query_api"):
+                        if name == "read_file":
+                            path_arg = args.get("path", "")
+                            result = read_file_impl(project_root, path_arg)
+                        elif name == "list_files":
+                            path_arg = args.get("path", "")
+                            result = list_files_impl(project_root, path_arg)
+                        elif name == "query_api":
+                            method = args.get("method", "GET")
+                            path_arg = args.get("path", "")
+                            body = args.get("body")
+                            include_auth = args.get("include_auth", True)
+                            result = query_api_impl(
+                                method, path_arg, body, include_auth
+                            )
+                        else:
+                            result = f"ERROR: unknown tool {name}"
+                        call_count += 1
+                        tool_calls.append(
+                            {"tool": name, "args": args, "result": result}
+                        )
+                        declared = {"function": {"name": name, "arguments": args}}
+                        messages.append({"role": "assistant", "tool_calls": [declared]})
+                        messages.append(
+                            {"role": "tool", "name": name, "content": result}
+                        )
+                        continue
                 # Handle direct JSON object with query_api fields (e.g., {"method": ..., "path": ...})
                 if (
                     isinstance(parsed, dict)
@@ -522,14 +557,59 @@ def main():
                     args = json.loads(args_text) if args_text else {}
                 except Exception:
                     args = {}
-                result = execute_tool(name, args, project_root)
+                # Execute the tool based on name
+                if name == "read_file":
+                    path_arg = args.get("path", "")
+                    result = read_file_impl(project_root, path_arg)
+                elif name == "list_files":
+                    path_arg = args.get("path", "")
+                    result = list_files_impl(project_root, path_arg)
+                elif name == "query_api":
+                    method = args.get("method", "GET")
+                    path_arg = args.get("path", "")
+                    body = args.get("body")
+                    include_auth = args.get("include_auth", True)
+                    result = query_api_impl(method, path_arg, body, include_auth)
+                else:
+                    result = f"ERROR: unknown tool {name}"
                 call_count += 1
                 tool_calls.append({"tool": name, "args": args, "result": result})
                 declared = {"function": {"name": name, "arguments": args}}
                 messages.append({"role": "assistant", "tool_calls": [declared]})
                 messages.append({"role": "tool", "name": name, "content": result})
+                continue
 
-            # Format 2: <function name="list_files">
+            # Format 2: <tool_code>print(list_files(path='.'))</tool_code>
+            tool_code_match = re.search(
+                r"<tool_code>.*?print\((?P<name>list_files|read_file|query_api)\s*\(\s*(?P<args>[^)]*)\s*\)\s*\).*?</tool_code>",
+                content,
+                re.DOTALL,
+            )
+            if tool_code_match:
+                name = tool_code_match.group("name").strip()
+                args_text = tool_code_match.group("args").strip()
+                # Extract path from args
+                path_match = re.search(r"path\s*=\s*['\"]([^'\"]+)['\"]", args_text)
+                path_arg = path_match.group(1) if path_match else ""
+                # Execute the tool based on name
+                if name == "read_file":
+                    result = read_file_impl(project_root, path_arg)
+                elif name == "list_files":
+                    result = list_files_impl(project_root, path_arg)
+                elif name == "query_api":
+                    result = query_api_impl("GET", path_arg, None, True)
+                else:
+                    result = f"ERROR: unknown tool {name}"
+                call_count += 1
+                tool_calls.append(
+                    {"tool": name, "args": {"path": path_arg}, "result": result}
+                )
+                declared = {"function": {"name": name, "arguments": {"path": path_arg}}}
+                messages.append({"role": "assistant", "tool_calls": [declared]})
+                messages.append({"role": "tool", "name": name, "content": result})
+                continue
+
+            # Format 3: <function name="list_files">
             # <parameter name="path">...</parameter>
             # </function>
             func_match = re.search(
